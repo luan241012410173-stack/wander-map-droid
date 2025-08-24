@@ -5,492 +5,222 @@ import { Geolocation } from '@capacitor/geolocation';
 import { Button } from '@/components/ui/button';
 import { Navigation, MapPin, Crosshair, Play, Square, Route } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
+import * as turf from '@turf/turf';
 
 const MapView = () => {
   const mapContainer = useRef(null);
-  const map = useRef(null);
-  const userMarker = useRef(null);
-  const destinationMarker = useRef(null);
-  const [userLocation, setUserLocation] = useState(null);
-  const [destination, setDestination] = useState(null);
+  const map = useRef<mapboxgl.Map | null>(null);
+  const userMarker = useRef<mapboxgl.Marker | null>(null);
+  const destinationMarker = useRef<mapboxgl.Marker | null>(null);
+  const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
+  const [destination, setDestination] = useState<[number, number] | null>(null);
   const [isLocating, setIsLocating] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
+  const [routeCoords, setRouteCoords] = useState<[number, number][]>([]);
   const [routeDistance, setRouteDistance] = useState('');
   const [routeDuration, setRouteDuration] = useState('');
-  const navigationWatchId = useRef(null);
+  const navigationWatchId = useRef<any>(null);
   const { toast } = useToast();
 
-  // Coordenadas de Campo Verde, Mato Grosso
-  const defaultCenter = [-55.9414, -15.2924];
+  const defaultCenter: [number, number] = [-55.9414, -15.2924]; // Campo Verde
 
-  // Verificar e solicitar permissões de geolocalização
   const checkAndRequestPermissions = async () => {
     try {
       const permissionStatus = await Geolocation.checkPermissions();
-      console.log('Status das permissões:', permissionStatus);
-      if (permissionStatus.location !== 'granted' && permissionStatus.coarseLocation !== 'granted') {
-        const requestStatus = await Geolocation.requestPermissions({ permissions: ['location', 'coarseLocation'] });
-        console.log('Resultado da solicitação de permissões:', requestStatus);
-        if (requestStatus.location !== 'granted' && requestStatus.coarseLocation !== 'granted') {
+      if (permissionStatus.location !== 'granted') {
+        const requestStatus = await Geolocation.requestPermissions({ permissions: ['location'] });
+        if (requestStatus.location !== 'granted') {
           toast({
-            title: "Permissões necessárias",
-            description: "Ative as permissões de localização nas configurações do dispositivo e tente novamente.",
-            variant: "destructive",
-            duration: 6000,
+            title: 'Permissões necessárias',
+            description: 'Ative as permissões de localização nas configurações.',
+            variant: 'destructive',
           });
           return false;
         }
       }
       return true;
-    } catch (error) {
-      console.error('Erro ao verificar/solicitar permissões:', error);
-      toast({
-        title: "Erro nas permissões",
-        description: "Não foi possível verificar as permissões. Ative a localização nas configurações do dispositivo.",
-        variant: "destructive",
-        duration: 6000,
-      });
+    } catch {
       return false;
     }
   };
 
-  // Função para obter localização com re-tentativas
-  const getCurrentLocation = async (retries = 3, delay = 3000) => {
+  const calculateBearing = (from: [number, number], to: [number, number]) => {
+    const y = Math.sin((to[0] - from[0]) * Math.PI / 180) * Math.cos(to[1] * Math.PI / 180);
+    const x =
+      Math.cos(from[1] * Math.PI / 180) * Math.sin(to[1] * Math.PI / 180) -
+      Math.sin(from[1] * Math.PI / 180) *
+        Math.cos(to[1] * Math.PI / 180) *
+        Math.cos((to[0] - from[0]) * Math.PI / 180);
+    const bearing = Math.atan2(y, x) * 180 / Math.PI;
+    return (bearing + 360) % 360;
+  };
+
+  const getCurrentLocation = async () => {
     setIsLocating(true);
     try {
       const hasPermission = await checkAndRequestPermissions();
-      if (!hasPermission) {
-        console.log('Permissões de localização não concedidas');
-        setIsLocating(false);
-        return;
-      }
+      if (!hasPermission) return;
 
-      console.log('Tentando obter localização... Tentativas restantes:', retries);
-      const coordinates = await Geolocation.getCurrentPosition({
-        enableHighAccuracy: true,
-        timeout: 20000, // Aumentado para 20 segundos
-        maximumAge: 0,
-      });
-
-      console.log('Coordenadas obtidas:', coordinates);
-      const { latitude, longitude } = coordinates.coords;
-      setUserLocation([longitude, latitude]);
+      const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true });
+      const coords: [number, number] = [pos.coords.longitude, pos.coords.latitude];
+      setUserLocation(coords);
 
       if (map.current) {
-        if (userMarker.current) {
-          userMarker.current.remove();
-        }
+        if (userMarker.current) userMarker.current.remove();
 
         const markerElement = document.createElement('div');
-        markerElement.className = 'w-4 h-4 bg-blue-500 rounded-full border-2 border-white shadow-lg';
+        markerElement.innerHTML = `
+          <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="#2563eb" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(0deg);">
+            <path d="M12 2 L19 21 L12 17 L5 21 Z" />
+          </svg>
+        `;
+        markerElement.style.transformOrigin = 'center';
 
-        userMarker.current = new mapboxgl.Marker(markerElement)
-          .setLngLat([longitude, latitude])
+        userMarker.current = new mapboxgl.Marker({ element: markerElement })
+          .setLngLat(coords)
           .addTo(map.current);
 
-        map.current.flyTo({
-          center: [longitude, latitude],
-          zoom: 16,
-          duration: 2000,
-        });
-
-        toast({
-          title: "Localização obtida",
-          description: "Sua localização atual foi encontrada com sucesso.",
-          duration: 4000,
-        });
-      }
-    } catch (error) {
-      console.error('Erro ao obter localização:', error);
-      if (retries > 0) {
-        toast({
-          title: "Tentando novamente...",
-          description: `Não foi possível obter a localização. Tentando novamente (${retries} tentativas restantes)...`,
-          duration: 4000,
-        });
-        setTimeout(() => getCurrentLocation(retries - 1, delay), delay);
-      } else {
-        toast({
-          title: "Erro ao obter localização",
-          description: "Ative o GPS, verifique a conexão e as permissões nas configurações do dispositivo.",
-          variant: "destructive",
-          duration: 6000,
-        });
+        map.current.flyTo({ center: coords, zoom: 16 });
       }
     } finally {
-      if (retries === 0 || userLocation) {
-        setIsLocating(false);
-      }
+      setIsLocating(false);
     }
   };
 
   useEffect(() => {
     if (!mapContainer.current) return;
 
-    mapboxgl.accessToken = 'pk.eyJ1IjoibHVhbnphZGEiLCJhIjoiY21keHNqbzdsMTMzazJtcHJ5ZDBjcXIyNSJ9.wer3icvYBkquPNu_iRrnzA';
+    mapboxgl.accessToken = 'SEU_TOKEN_MAPBOX_AQUI';
 
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
-      style: 'mapbox://styles/luanzada/cmdz2rxnt015e01qp6eyi1nwp',
+      style: 'mapbox://styles/mapbox/streets-v11',
       center: defaultCenter,
       zoom: 12,
-      pitch: 0,
-      bearing: 0,
     });
 
-    map.current.addControl(
-      new mapboxgl.NavigationControl({
-        visualizePitch: true,
-      }),
-      'top-right'
-    );
-
-    map.current.addControl(new mapboxgl.ScaleControl(), 'bottom-left');
-    map.current.scrollZoom.disable();
-
-    // Tentar obter a localização inicial
-    getCurrentLocation();
+    map.current.on('click', handleMapClick);
 
     return () => {
-      if (navigationWatchId.current) {
-        Geolocation.clearWatch({ id: navigationWatchId.current });
-      }
+      if (navigationWatchId.current) Geolocation.clearWatch({ id: navigationWatchId.current });
       map.current?.remove();
     };
   }, []);
 
-  const createRoute = async (destination) => {
-    if (!userLocation || !map.current) {
-      console.log('Não foi possível criar rota: userLocation ou map.current não definidos', { userLocation, mapCurrent: !!map.current });
-      toast({
-        title: "Localização necessária",
-        description: "Clique no botão 🎯 para obter sua localização atual.",
-        variant: "destructive",
-        duration: 6000,
-      });
-      return;
+  const createRoute = async (dest: [number, number]) => {
+    if (!userLocation) return;
+    const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${userLocation[0]},${userLocation[1]};${dest[0]},${dest[1]}?geometries=geojson&access_token=${mapboxgl.accessToken}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    const route = data.routes[0];
+
+    setRouteCoords(route.geometry.coordinates);
+    setRouteDistance((route.distance / 1000).toFixed(1) + ' km');
+    setRouteDuration(Math.round(route.duration / 60) + ' min');
+
+    if (map.current?.getSource('route')) {
+      map.current.removeLayer('route');
+      map.current.removeSource('route');
     }
 
-    try {
-      console.log('Criando rota com origem:', userLocation, 'e destino:', destination);
-      const response = await fetch(
-        `https://api.mapbox.com/directions/v5/mapbox/driving/${userLocation[0]},${userLocation[1]};${destination[0]},${destination[1]}?geometries=geojson&access_token=${mapboxgl.accessToken}`
-      );
+    map.current?.addSource('route', {
+      type: 'geojson',
+      data: {
+        type: 'Feature',
+        geometry: route.geometry,
+      },
+    });
 
-      if (!response.ok) {
-        throw new Error(`Erro na API do Mapbox: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      console.log('Resposta da API do Mapbox:', data);
-
-      if (data.routes && data.routes.length > 0) {
-        const route = data.routes[0];
-
-        setRouteDistance((route.distance / 1000).toFixed(1) + ' km');
-        setRouteDuration(Math.round(route.duration / 60) + ' min');
-
-        if (map.current.getSource('route')) {
-          map.current.removeLayer('route');
-          map.current.removeSource('route');
-        }
-
-        map.current.addSource('route', {
-          type: 'geojson',
-          data: {
-            type: 'Feature',
-            properties: {},
-            geometry: route.geometry,
-          },
-        });
-
-        map.current.addLayer({
-          id: 'route',
-          type: 'line',
-          source: 'route',
-          layout: {
-            'line-join': 'round',
-            'line-cap': 'round',
-          },
-          paint: {
-            'line-color': '#3B82F6',
-            'line-width': 5,
-            'line-opacity': 0.8,
-          },
-        });
-
-        toast({
-          title: "Rota criada!",
-          description: `${(route.distance / 1000).toFixed(1)} km • ${Math.round(route.duration / 60)} min`,
-          duration: 4000,
-        });
-      } else {
-        throw new Error('Nenhuma rota encontrada');
-      }
-    } catch (error) {
-      console.error('Erro ao criar rota:', error);
-      toast({
-        title: "Erro ao criar rota",
-        description: "Não foi possível criar a rota. Verifique sua conexão e tente novamente.",
-        variant: "destructive",
-        duration: 6000,
-      });
-    }
+    map.current?.addLayer({
+      id: 'route',
+      type: 'line',
+      source: 'route',
+      paint: { 'line-color': '#3B82F6', 'line-width': 5 },
+    });
   };
 
-  const handleMapClick = (e) => {
-    console.log('Clique no mapa detectado:', e);
-    if (!userLocation) {
-      console.log('userLocation não definido ao clicar no mapa');
-      toast({
-        title: "Localização necessária",
-        description: "Clique no botão 🎯 para obter sua localização atual.",
-        variant: "destructive",
-        duration: 6000,
-      });
-      return;
-    }
+  const handleMapClick = (e: mapboxgl.MapMouseEvent & mapboxgl.EventData) => {
+    if (!userLocation) return;
+    const dest: [number, number] = [e.lngLat.lng, e.lngLat.lat];
+    setDestination(dest);
 
-    const { lng, lat } = e.lngLat;
-    setDestination([lng, lat]);
+    if (destinationMarker.current) destinationMarker.current.remove();
 
-    if (destinationMarker.current) {
-      destinationMarker.current.remove();
-    }
+    const markerEl = document.createElement('div');
+    markerEl.innerHTML = '🎯';
+    destinationMarker.current = new mapboxgl.Marker(markerEl).setLngLat(dest).addTo(map.current!);
 
-    const markerElement = document.createElement('div');
-    markerElement.className = 'w-6 h-6 bg-red-500 rounded-full border-2 border-white shadow-lg flex items-center justify-center';
-    markerElement.innerHTML = '🎯';
-
-    destinationMarker.current = new mapboxgl.Marker(markerElement)
-      .setLngLat([lng, lat])
-      .addTo(map.current);
-
-    createRoute([lng, lat]);
+    createRoute(dest);
   };
 
   const startNavigation = async () => {
-    if (!destination || !userLocation) {
-      console.log('Não foi possível iniciar navegação: destino ou localização não definidos', { destination, userLocation });
-      toast({
-        title: "Destino ou localização não definidos",
-        description: "Defina um destino e obtenha sua localização atual.",
-        variant: "destructive",
-        duration: 6000,
-      });
-      return;
-    }
-
+    if (!destination) return;
     setIsNavigating(true);
 
-    try {
-      const hasPermission = await checkAndRequestPermissions();
-      if (!hasPermission) {
-        console.log('Permissões não concedidas para navegação');
-        setIsNavigating(false);
-        return;
-      }
+    navigationWatchId.current = await Geolocation.watchPosition(
+      { enableHighAccuracy: true },
+      (pos) => {
+        if (!pos || !userLocation) return;
+        const newLoc: [number, number] = [pos.coords.longitude, pos.coords.latitude];
+        if (userMarker.current) {
+          userMarker.current.setLngLat(newLoc);
+          const bearing = calculateBearing(userLocation, newLoc);
+          const svg = userMarker.current.getElement().querySelector('svg');
+          if (svg) svg.style.transform = `rotate(${bearing}deg)`;
+        }
+        setUserLocation(newLoc);
 
-      navigationWatchId.current = await Geolocation.watchPosition(
-        {
-          enableHighAccuracy: true,
-          timeout: 20000,
-          maximumAge: 0,
-        },
-        (position) => {
-          console.log('Atualização de localização em tempo real:', position);
-          const { latitude, longitude } = position.coords;
-          const newLocation = [longitude, latitude];
-
-          setUserLocation(newLocation);
-
-          if (userMarker.current) {
-            userMarker.current.setLngLat(newLocation);
-          }
-
-          map.current?.easeTo({
-            center: newLocation,
-            duration: 1000,
+        // atualizar rota removendo pontos percorridos
+        if (map.current?.getSource('route')) {
+          const remaining = routeCoords.filter((coord) => {
+            const dist = turf.distance(turf.point(coord), turf.point(newLoc), { units: 'meters' });
+            return dist > 20; // remove pontos a menos de 20m
+          });
+          setRouteCoords(remaining);
+          (map.current.getSource('route') as mapboxgl.GeoJSONSource).setData({
+            type: 'Feature',
+            geometry: { type: 'LineString', coordinates: remaining },
           });
         }
-      );
 
-      toast({
-        title: "Navegação iniciada",
-        description: "Siga as instruções da rota.",
-        duration: 4000,
-      });
-    } catch (error) {
-      console.error('Erro ao iniciar navegação:', error);
-      setIsNavigating(false);
-      toast({
-        title: "Erro ao iniciar navegação",
-        description: "Não foi possível iniciar a navegação. Verifique o GPS e as permissões.",
-        variant: "destructive",
-        duration: 6000,
-      });
-    }
+        map.current?.easeTo({ center: newLoc, duration: 1000 });
+      }
+    );
   };
 
   const stopNavigation = async () => {
     setIsNavigating(false);
-
     if (navigationWatchId.current) {
       await Geolocation.clearWatch({ id: navigationWatchId.current });
       navigationWatchId.current = null;
     }
-
-    if (map.current) {
-      if (map.current.getSource('route')) {
-        map.current.removeLayer('route');
-        map.current.removeSource('route');
-      }
+    if (map.current?.getSource('route')) {
+      map.current.removeLayer('route');
+      map.current.removeSource('route');
     }
-
-    if (destinationMarker.current) {
-      destinationMarker.current.remove();
-      destinationMarker.current = null;
-    }
-
     setDestination(null);
-    setRouteDistance('');
-    setRouteDuration('');
-
-    toast({
-      title: "Navegação finalizada",
-      description: "Rota removida.",
-      duration: 4000,
-    });
+    setRouteCoords([]);
   };
-
-  useEffect(() => {
-    if (!map.current) return;
-
-    const handleInteraction = (e) => {
-      handleMapClick(e);
-    };
-
-    map.current.on('click', handleInteraction);
-    map.current.on('touchstart', handleInteraction);
-
-    return () => {
-      map.current?.off('click', handleInteraction);
-      map.current?.off('touchstart', handleInteraction);
-    };
-  }, [userLocation]);
 
   return (
     <div className="relative w-full h-screen">
       <div ref={mapContainer} className="absolute inset-0" />
-
-      {/* Controles Flutuantes */}
-      <div className="absolute top-4 left-4 right-4 z-10">
-        <div className="bg-white/95 backdrop-blur-sm rounded-xl shadow-lg border border-gray-200/20 p-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <MapPin className="w-5 h-5 text-blue-500" />
-              <span className="text-sm font-medium">GPS Navigator</span>
-            </div>
-            <div className="flex items-center space-x-1">
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-              <span className="text-xs text-gray-500">Online</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Botão de Localização */}
-      <div className="absolute bottom-20 right-4 z-10">
-        <Button
-          variant="default"
-          size="lg"
-          onClick={() => getCurrentLocation()}
-          disabled={isLocating}
-          className="bg-blue-500 hover:bg-blue-600 text-white shadow-lg w-14 h-14 rounded-full p-0"
-        >
-          <Crosshair className={`w-6 h-6 ${isLocating ? 'animate-spin' : ''}`} />
+      {/* Botões principais */}
+      <div className="absolute bottom-20 right-4 flex flex-col gap-3 z-10">
+        <Button onClick={getCurrentLocation} disabled={isLocating}>
+          <Crosshair className="w-6 h-6" />
         </Button>
-      </div>
-
-      {/* Botão de Navegação */}
-      <div className="absolute bottom-4 right-4 z-10">
         {destination && !isNavigating && (
-          <Button
-            variant="default"
-            size="lg"
-            onClick={startNavigation}
-            className="bg-green-500 hover:bg-green-600 text-white shadow-lg w-14 h-14 rounded-full p-0 mr-16"
-          >
+          <Button onClick={startNavigation}>
             <Play className="w-6 h-6" />
           </Button>
         )}
         {isNavigating && (
-          <Button
-            variant="destructive"
-            size="lg"
-            onClick={stopNavigation}
-            className="bg-red-500 hover:bg-red-600 shadow-lg w-14 h-14 rounded-full p-0"
-          >
+          <Button variant="destructive" onClick={stopNavigation}>
             <Square className="w-6 h-6" />
           </Button>
         )}
       </div>
-
-      {/* Painel de Informações da Rota */}
-      {destination && routeDistance && (
-        <div className="absolute top-20 left-4 right-4 z-10">
-          <div className="bg-white/95 backdrop-blur-sm rounded-xl shadow-lg border border-gray-200/20 p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <Route className="w-5 h-5 text-green-500" />
-                <div>
-                  <div className="text-sm font-medium">{routeDistance}</div>
-                  <div className="text-xs text-gray-500">{routeDuration}</div>
-                </div>
-              </div>
-              <div className="flex items-center space-x-2">
-                {isNavigating && (
-                  <div className="flex items-center space-x-1">
-                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                    <span className="text-xs text-gray-500">Navegando</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Painel de Instruções */}
-      {!userLocation && (
-        <div className="absolute bottom-20 left-4 right-20 z-10">
-          <div className="bg-white/95 backdrop-blur-sm rounded-xl shadow-lg border border-gray-200/20 p-4">
-            <div className="text-sm">
-              <div className="font-medium text-gray-800 mb-2">Como usar:</div>
-              <div className="text-xs text-gray-500 space-y-1">
-                <div>1. Clique no botão 🎯 para obter sua localização</div>
-                <div>2. Toque no mapa para definir destino</div>
-                <div>3. Clique em ▶️ para iniciar navegação</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Painel de Informações Inferior */}
-      {userLocation && (
-        <div className="absolute bottom-4 left-4 z-10 bg-white/95 backdrop-blur-sm rounded-xl shadow-lg border border-gray-200/20 p-4 max-w-xs">
-          <div className="text-sm">
-            <div className="font-medium text-gray-800 mb-1">Localização Atual</div>
-            <div className="text-xs text-gray-500">
-              Lat: {userLocation[1].toFixed(6)}
-            </div>
-            <div className="text-xs text-gray-500">
-              Lng: {userLocation[0].toFixed(6)}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
