@@ -1,21 +1,9 @@
 import { useEffect, useRef } from 'react';
 import mapboxgl from 'mapbox-gl';
 import { Geolocation, GeolocationPosition } from '@capacitor/geolocation';
-import { initializeApp } from 'firebase/app';
-import { getDatabase, ref, set } from 'firebase/database';
 import './App.css';
 
 mapboxgl.accessToken = 'pk.eyJ1IjoibHVhbnphZGEiLCJhIjoiY21keHNqbzdsMTMzazJtcHJ5ZDBjcXIyNSJ9.wer3icvYBkquPNu_iRrnzA';
-
-const firebaseConfig = {
-  apiKey: "SUA_API_KEY",
-  authDomain: "SEU_PROJETO.firebaseapp.com",
-  databaseURL: "https://SEU_PROJETO.firebaseio.com",
-  projectId: "SEU_PROJETO",
-  storageBucket: "SEU_PROJETO.appspot.com",
-  messagingSenderId: "SEU_SENDER_ID",
-  appId: "SEU_APP_ID"
-};
 
 const App = () => {
   const mapContainer = useRef<HTMLDivElement | null>(null);
@@ -23,10 +11,6 @@ const App = () => {
   const markerRef = useRef<mapboxgl.Marker | null>(null);
 
   useEffect(() => {
-    // Inicializar Firebase
-    const app = initializeApp(firebaseConfig);
-    const database = getDatabase(app);
-
     if (mapContainer.current) {
       mapRef.current = new mapboxgl.Map({
         container: mapContainer.current,
@@ -109,13 +93,6 @@ const App = () => {
                 geometry: { type: 'Point', coordinates: [longitude, latitude] },
               });
             }
-
-            // Firebase Realtime Database (modular)
-            set(ref(database, 'users/user_id'), {
-              latitude,
-              longitude,
-              timestamp: Date.now(),
-            });
           }
         );
 
