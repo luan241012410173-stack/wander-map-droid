@@ -20,22 +20,23 @@ const MapView = () => {
   const navigationWatchId = useRef<string | null>(null);
   const { toast } = useToast();
 
+  // Coordenadas de Campo Verde, Mato Grosso
+  const defaultCenter: [number, number] = [-55.9414, -15.2924]; 
+
   useEffect(() => {
     if (!mapContainer.current) return;
 
-    // Initialize map with custom style
     mapboxgl.accessToken = 'pk.eyJ1IjoibHVhbnphZGEiLCJhIjoiY21keHNqbzdsMTMzazJtcHJ5ZDBjcXIyNSJ9.wer3icvYBkquPNu_iRrnzA';
-    
+
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
       style: 'mapbox://styles/luanzada/cmdz2rxnt015e01qp6eyi1nwp',
-      center: [-46.6333, -23.5505], // São Paulo default
+      center: defaultCenter,
       zoom: 12,
       pitch: 0,
-      bearing: 0
+      bearing: 0,
     });
 
-    // Add navigation controls
     map.current.addControl(
       new mapboxgl.NavigationControl({
         visualizePitch: true,
@@ -43,15 +44,13 @@ const MapView = () => {
       'top-right'
     );
 
-    // Add scale control
     map.current.addControl(new mapboxgl.ScaleControl(), 'bottom-left');
-
-    // Disable scroll zoom on mobile for better UX
     map.current.scrollZoom.disable();
-    map.current.addControl(new mapboxgl.NavigationControl());
+
+    // Pedir localização logo que carrega o mapa
+    getCurrentLocation();
 
     return () => {
-      // Stop navigation watch if active
       if (navigationWatchId.current) {
         Geolocation.clearWatch({ id: navigationWatchId.current });
       }
@@ -71,35 +70,35 @@ const MapView = () => {
       setUserLocation([longitude, latitude]);
 
       if (map.current) {
-        // Remove existing marker
         if (userMarker.current) {
           userMarker.current.remove();
         }
 
-        // Create custom marker element
         const markerElement = document.createElement('div');
         markerElement.className = 'w-4 h-4 bg-navigation rounded-full border-2 border-white shadow-lg';
 
-        // Add new marker
         userMarker.current = new mapboxgl.Marker(markerElement)
           .setLngLat([longitude, latitude])
           .addTo(map.current);
 
-        // Fly to user location
         map.current.flyTo({
           center: [longitude, latitude],
           zoom: 16,
-          duration: 2000
+          duration: 2000,
         });
       }
     } catch (error) {
       console.error('Error getting location:', error);
+      toast({
+        title: "Erro ao obter localização",
+        description: "Ative a localização para usar o app",
+        variant: "destructive",
+      });
     } finally {
       setIsLocating(false);
     }
   };
 
-  // Create route between user location and destination
   const createRoute = async (destination: [number, number]) => {
     if (!userLocation || !map.current) return;
 
@@ -112,44 +111,42 @@ const MapView = () => {
       
       if (data.routes && data.routes.length > 0) {
         const route = data.routes[0];
-        
-        // Set route info
+
         setRouteDistance((route.distance / 1000).toFixed(1) + ' km');
         setRouteDuration(Math.round(route.duration / 60) + ' min');
-        
-        // Add route layer to map
+
         if (map.current.getSource('route')) {
           map.current.removeLayer('route');
           map.current.removeSource('route');
         }
-        
+
         map.current.addSource('route', {
           type: 'geojson',
           data: {
             type: 'Feature',
             properties: {},
-            geometry: route.geometry
-          }
+            geometry: route.geometry,
+          },
         });
-        
+
         map.current.addLayer({
           id: 'route',
           type: 'line',
           source: 'route',
           layout: {
             'line-join': 'round',
-            'line-cap': 'round'
+            'line-cap': 'round',
           },
           paint: {
             'line-color': '#3B82F6',
             'line-width': 5,
-            'line-opacity': 0.8
-          }
+            'line-opacity': 0.8,
+          },
         });
 
         toast({
           title: "Rota criada!",
-          description: `${routeDistance} • ${routeDuration}`,
+          description: `${(route.distance / 1000).toFixed(1)} km • ${Math.round(route.duration / 60)} min`,
         });
       }
     } catch (error) {
@@ -162,7 +159,6 @@ const MapView = () => {
     }
   };
 
-  // Handle map click to set destination
   const handleMapClick = (e: mapboxgl.MapMouseEvent) => {
     if (!userLocation) {
       toast({
@@ -176,12 +172,10 @@ const MapView = () => {
     const { lng, lat } = e.lngLat;
     setDestination([lng, lat]);
 
-    // Remove existing destination marker
     if (destinationMarker.current) {
       destinationMarker.current.remove();
     }
 
-    // Create destination marker
     const markerElement = document.createElement('div');
     markerElement.className = 'w-6 h-6 bg-destructive rounded-full border-2 border-white shadow-lg flex items-center justify-center';
     markerElement.innerHTML = '🎯';
@@ -190,17 +184,14 @@ const MapView = () => {
       .setLngLat([lng, lat])
       .addTo(map.current!);
 
-    // Create route
     createRoute([lng, lat]);
   };
 
-  // Start navigation
   const startNavigation = async () => {
     if (!destination || !userLocation) return;
 
     setIsNavigating(true);
-    
-    // Start watching position
+
     try {
       navigationWatchId.current = await Geolocation.watchPosition(
         {
@@ -210,18 +201,16 @@ const MapView = () => {
         (position) => {
           const { latitude, longitude } = position.coords;
           const newLocation: [number, number] = [longitude, latitude];
-          
+
           setUserLocation(newLocation);
-          
-          // Update user marker
+
           if (userMarker.current) {
             userMarker.current.setLngLat(newLocation);
           }
-          
-          // Center map on user location during navigation
+
           map.current?.easeTo({
             center: newLocation,
-            duration: 1000
+            duration: 1000,
           });
         }
       );
@@ -236,16 +225,14 @@ const MapView = () => {
     }
   };
 
-  // Stop navigation
   const stopNavigation = async () => {
     setIsNavigating(false);
-    
+
     if (navigationWatchId.current) {
       await Geolocation.clearWatch({ id: navigationWatchId.current });
       navigationWatchId.current = null;
     }
 
-    // Clear route and destination
     if (map.current) {
       if (map.current.getSource('route')) {
         map.current.removeLayer('route');
@@ -268,7 +255,6 @@ const MapView = () => {
     });
   };
 
-  // Add map click handler
   useEffect(() => {
     if (!map.current) return;
 
@@ -285,9 +271,8 @@ const MapView = () => {
 
   return (
     <div className="relative w-full h-screen">
-      {/* Map Container */}
       <div ref={mapContainer} className="absolute inset-0" />
-      
+
       {/* Floating Controls */}
       <div className="absolute top-4 left-4 right-4 z-10">
         <div className="bg-surface/95 backdrop-blur-sm rounded-xl shadow-lg border border-border/20 p-3">
