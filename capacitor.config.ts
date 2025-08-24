@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'app.lovable.247f73b9ba494810bd70531b6b75efa6',
+  appId: 'com.gpsnavigator.app',
   appName: 'GPS Navigator',
   webDir: 'dist',
   server: {
