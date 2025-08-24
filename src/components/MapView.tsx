@@ -236,8 +236,8 @@ const MapView = () => {
   return (
     <div className="relative w-full h-screen">
       <div ref={mapContainer} className="absolute inset-0" />
-
       {/* Floating Controls */}
       <div className="absolute top-4 left-4 right-4 z-10">
         <div className="bg-surface/95 backdrop-blur-sm rounded-xl shadow-lg border border-border/20 p-3">
-          <div className="flex
+          <div className="flex items-center justify-between">
+            <div
