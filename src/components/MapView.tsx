@@ -4,7 +4,7 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import { Geolocation } from '@capacitor/geolocation';
 import { Button } from '@/components/ui/button';
 import { Navigation, MapPin, Crosshair, Play, Square, Route } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
+import { useToast } from '@/components/ui/use-toast';
 
 const MapView = () => {
   const mapContainer = useRef(null);
@@ -27,22 +27,100 @@ const MapView = () => {
   const checkAndRequestPermissions = async () => {
     try {
       const permissionStatus = await Geolocation.checkPermissions();
+      console.log('Status das permissões:', permissionStatus);
       if (permissionStatus.location !== 'granted' && permissionStatus.coarseLocation !== 'granted') {
-        await Geolocation.requestPermissions({ permissions: ['location', 'coarseLocation'] });
-        const newStatus = await Geolocation.checkPermissions();
-        if (newStatus.location !== 'granted' && newStatus.coarseLocation !== 'granted') {
-          throw new Error('Permissões de localização não concedidas');
+        const requestStatus = await Geolocation.requestPermissions({ permissions: ['location', 'coarseLocation'] });
+        console.log('Resultado da solicitação de permissões:', requestStatus);
+        if (requestStatus.location !== 'granted' && requestStatus.coarseLocation !== 'granted') {
+          toast({
+            title: "Permissões necessárias",
+            description: "Ative as permissões de localização nas configurações do dispositivo e tente novamente.",
+            variant: "destructive",
+            duration: 6000,
+          });
+          return false;
         }
       }
       return true;
     } catch (error) {
       console.error('Erro ao verificar/solicitar permissões:', error);
       toast({
-        title: "Permissões necessárias",
-        description: "Por favor, conceda permissões de localização para usar o app",
+        title: "Erro nas permissões",
+        description: "Não foi possível verificar as permissões. Ative a localização nas configurações do dispositivo.",
         variant: "destructive",
+        duration: 6000,
       });
       return false;
+    }
+  };
+
+  // Função para obter localização com re-tentativas
+  const getCurrentLocation = async (retries = 3, delay = 3000) => {
+    setIsLocating(true);
+    try {
+      const hasPermission = await checkAndRequestPermissions();
+      if (!hasPermission) {
+        console.log('Permissões de localização não concedidas');
+        setIsLocating(false);
+        return;
+      }
+
+      console.log('Tentando obter localização... Tentativas restantes:', retries);
+      const coordinates = await Geolocation.getCurrentPosition({
+        enableHighAccuracy: true,
+        timeout: 20000, // Aumentado para 20 segundos
+        maximumAge: 0,
+      });
+
+      console.log('Coordenadas obtidas:', coordinates);
+      const { latitude, longitude } = coordinates.coords;
+      setUserLocation([longitude, latitude]);
+
+      if (map.current) {
+        if (userMarker.current) {
+          userMarker.current.remove();
+        }
+
+        const markerElement = document.createElement('div');
+        markerElement.className = 'w-4 h-4 bg-blue-500 rounded-full border-2 border-white shadow-lg';
+
+        userMarker.current = new mapboxgl.Marker(markerElement)
+          .setLngLat([longitude, latitude])
+          .addTo(map.current);
+
+        map.current.flyTo({
+          center: [longitude, latitude],
+          zoom: 16,
+          duration: 2000,
+        });
+
+        toast({
+          title: "Localização obtida",
+          description: "Sua localização atual foi encontrada com sucesso.",
+          duration: 4000,
+        });
+      }
+    } catch (error) {
+      console.error('Erro ao obter localização:', error);
+      if (retries > 0) {
+        toast({
+          title: "Tentando novamente...",
+          description: `Não foi possível obter a localização. Tentando novamente (${retries} tentativas restantes)...`,
+          duration: 4000,
+        });
+        setTimeout(() => getCurrentLocation(retries - 1, delay), delay);
+      } else {
+        toast({
+          title: "Erro ao obter localização",
+          description: "Ative o GPS, verifique a conexão e as permissões nas configurações do dispositivo.",
+          variant: "destructive",
+          duration: 6000,
+        });
+      }
+    } finally {
+      if (retries === 0 || userLocation) {
+        setIsLocating(false);
+      }
     }
   };
 
@@ -70,7 +148,7 @@ const MapView = () => {
     map.current.addControl(new mapboxgl.ScaleControl(), 'bottom-left');
     map.current.scrollZoom.disable();
 
-    // Pedir localização logo que carrega o mapa
+    // Tentar obter a localização inicial
     getCurrentLocation();
 
     return () => {
@@ -81,64 +159,20 @@ const MapView = () => {
     };
   }, []);
 
-  const getCurrentLocation = async () => {
-    setIsLocating(true);
-    try {
-      const hasPermission = await checkAndRequestPermissions();
-      if (!hasPermission) {
-        setIsLocating(false);
-        return;
-      }
-
-      const coordinates = await Geolocation.getCurrentPosition({
-        enableHighAccuracy: true,
-        timeout: 10000,
-      });
-
-      const { latitude, longitude } = coordinates.coords;
-      setUserLocation([longitude, latitude]);
-
-      if (map.current) {
-        if (userMarker.current) {
-          userMarker.current.remove();
-        }
-
-        const markerElement = document.createElement('div');
-        markerElement.className = 'w-4 h-4 bg-blue-500 rounded-full border-2 border-white shadow-lg';
-
-        userMarker.current = new mapboxgl.Marker(markerElement)
-          .setLngLat([longitude, latitude])
-          .addTo(map.current);
-
-        map.current.flyTo({
-          center: [longitude, latitude],
-          zoom: 16,
-          duration: 2000,
-        });
-      }
-    } catch (error) {
-      console.error('Erro ao obter localização:', error);
-      toast({
-        title: "Erro ao obter localização",
-        description: "Verifique se a localização está ativa e tente novamente",
-        variant: "destructive",
-      });
-    } finally {
-      setIsLocating(false);
-    }
-  };
-
   const createRoute = async (destination) => {
     if (!userLocation || !map.current) {
+      console.log('Não foi possível criar rota: userLocation ou map.current não definidos', { userLocation, mapCurrent: !!map.current });
       toast({
         title: "Localização necessária",
-        description: "Obtenha sua localização atual antes de criar uma rota",
+        description: "Clique no botão 🎯 para obter sua localização atual.",
         variant: "destructive",
+        duration: 6000,
       });
       return;
     }
 
     try {
+      console.log('Criando rota com origem:', userLocation, 'e destino:', destination);
       const response = await fetch(
         `https://api.mapbox.com/directions/v5/mapbox/driving/${userLocation[0]},${userLocation[1]};${destination[0]},${destination[1]}?geometries=geojson&access_token=${mapboxgl.accessToken}`
       );
@@ -148,6 +182,7 @@ const MapView = () => {
       }
 
       const data = await response.json();
+      console.log('Resposta da API do Mapbox:', data);
 
       if (data.routes && data.routes.length > 0) {
         const route = data.routes[0];
@@ -187,6 +222,7 @@ const MapView = () => {
         toast({
           title: "Rota criada!",
           description: `${(route.distance / 1000).toFixed(1)} km • ${Math.round(route.duration / 60)} min`,
+          duration: 4000,
         });
       } else {
         throw new Error('Nenhuma rota encontrada');
@@ -197,16 +233,20 @@ const MapView = () => {
         title: "Erro ao criar rota",
         description: "Não foi possível criar a rota. Verifique sua conexão e tente novamente.",
         variant: "destructive",
+        duration: 6000,
       });
     }
   };
 
   const handleMapClick = (e) => {
+    console.log('Clique no mapa detectado:', e);
     if (!userLocation) {
+      console.log('userLocation não definido ao clicar no mapa');
       toast({
         title: "Localização necessária",
-        description: "Primeiro obtenha sua localização atual",
+        description: "Clique no botão 🎯 para obter sua localização atual.",
         variant: "destructive",
+        duration: 6000,
       });
       return;
     }
@@ -231,10 +271,12 @@ const MapView = () => {
 
   const startNavigation = async () => {
     if (!destination || !userLocation) {
+      console.log('Não foi possível iniciar navegação: destino ou localização não definidos', { destination, userLocation });
       toast({
         title: "Destino ou localização não definidos",
-        description: "Defina um destino e obtenha sua localização atual",
+        description: "Defina um destino e obtenha sua localização atual.",
         variant: "destructive",
+        duration: 6000,
       });
       return;
     }
@@ -244,6 +286,7 @@ const MapView = () => {
     try {
       const hasPermission = await checkAndRequestPermissions();
       if (!hasPermission) {
+        console.log('Permissões não concedidas para navegação');
         setIsNavigating(false);
         return;
       }
@@ -251,9 +294,11 @@ const MapView = () => {
       navigationWatchId.current = await Geolocation.watchPosition(
         {
           enableHighAccuracy: true,
-          timeout: 10000,
+          timeout: 20000,
+          maximumAge: 0,
         },
         (position) => {
+          console.log('Atualização de localização em tempo real:', position);
           const { latitude, longitude } = position.coords;
           const newLocation = [longitude, latitude];
 
@@ -272,15 +317,17 @@ const MapView = () => {
 
       toast({
         title: "Navegação iniciada",
-        description: "Siga as instruções da rota",
+        description: "Siga as instruções da rota.",
+        duration: 4000,
       });
     } catch (error) {
       console.error('Erro ao iniciar navegação:', error);
       setIsNavigating(false);
       toast({
-        title: "Erro",
-        description: "Não foi possível iniciar a navegação",
+        title: "Erro ao iniciar navegação",
+        description: "Não foi possível iniciar a navegação. Verifique o GPS e as permissões.",
         variant: "destructive",
+        duration: 6000,
       });
     }
   };
@@ -311,7 +358,8 @@ const MapView = () => {
 
     toast({
       title: "Navegação finalizada",
-      description: "Rota removida",
+      description: "Rota removida.",
+      duration: 4000,
     });
   };
 
@@ -323,7 +371,7 @@ const MapView = () => {
     };
 
     map.current.on('click', handleInteraction);
-    map.current.on('touchstart', handleInteraction); // Suporte a toque em dispositivos móveis
+    map.current.on('touchstart', handleInteraction);
 
     return () => {
       map.current?.off('click', handleInteraction);
@@ -356,7 +404,7 @@ const MapView = () => {
         <Button
           variant="default"
           size="lg"
-          onClick={getCurrentLocation}
+          onClick={() => getCurrentLocation()}
           disabled={isLocating}
           className="bg-blue-500 hover:bg-blue-600 text-white shadow-lg w-14 h-14 rounded-full p-0"
         >
