@@ -12,13 +12,28 @@ import { cn } from '@/lib/utils';
 
 interface FloatingControlsProps {
   className?: string;
+  onMenuClick?: () => void;
+  onToggleLayers?: () => void;
+  onRoutePlanning?: () => void;
+  onBookmarks?: () => void;
+  onShare?: () => void;
+  onSettings?: () => void;
 }
 
-const FloatingControls = ({ className }: FloatingControlsProps) => {
+const FloatingControls = ({
+  className,
+  onMenuClick,
+  onToggleLayers,
+  onRoutePlanning,
+  onBookmarks,
+  onShare,
+  onSettings,
+}: FloatingControlsProps) => {
   return (
     <div className={cn("space-y-3", className)}>
       {/* Menu Button */}
       <Button
+        onClick={onMenuClick}
         variant="outline"
         size="lg"
         className="bg-surface/95 backdrop-blur-sm hover:bg-surface border-border/20 shadow-floating w-12 h-12 rounded-full p-0"
@@ -28,6 +43,7 @@ const FloatingControls = ({ className }: FloatingControlsProps) => {
 
       {/* Layer Toggle */}
       <Button
+        onClick={onToggleLayers}
         variant="outline"
         size="lg"
         className="bg-surface/95 backdrop-blur-sm hover:bg-surface border-border/20 shadow-floating w-12 h-12 rounded-full p-0"
@@ -37,6 +53,7 @@ const FloatingControls = ({ className }: FloatingControlsProps) => {
 
       {/* Route Planning */}
       <Button
+        onClick={onRoutePlanning}
         variant="outline"
         size="lg"
         className="bg-surface/95 backdrop-blur-sm hover:bg-surface border-border/20 shadow-floating w-12 h-12 rounded-full p-0"
@@ -46,6 +63,7 @@ const FloatingControls = ({ className }: FloatingControlsProps) => {
 
       {/* Bookmarks */}
       <Button
+        onClick={onBookmarks}
         variant="outline"
         size="lg"
         className="bg-surface/95 backdrop-blur-sm hover:bg-surface border-border/20 shadow-floating w-12 h-12 rounded-full p-0"
@@ -55,6 +73,7 @@ const FloatingControls = ({ className }: FloatingControlsProps) => {
 
       {/* Share */}
       <Button
+        onClick={onShare}
         variant="outline"
         size="lg"
         className="bg-surface/95 backdrop-blur-sm hover:bg-surface border-border/20 shadow-floating w-12 h-12 rounded-full p-0"
@@ -64,6 +83,7 @@ const FloatingControls = ({ className }: FloatingControlsProps) => {
 
       {/* Settings */}
       <Button
+        onClick={onSettings}
         variant="outline"
         size="lg"
         className="bg-surface/95 backdrop-blur-sm hover:bg-surface border-border/20 shadow-floating w-12 h-12 rounded-full p-0"
