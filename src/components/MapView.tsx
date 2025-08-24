@@ -3,7 +3,7 @@ import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { Geolocation } from '@capacitor/geolocation';
 import { Button } from '@/components/ui/button';
-import { Navigation, MapPin, Crosshair, Play, Square, Route } from 'lucide-react';
+import { Crosshair, Play, Square } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import * as turf from '@turf/turf';
 
@@ -12,27 +12,33 @@ const MapView = () => {
   const map = useRef<mapboxgl.Map | null>(null);
   const userMarker = useRef<mapboxgl.Marker | null>(null);
   const destinationMarker = useRef<mapboxgl.Marker | null>(null);
+
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
   const [destination, setDestination] = useState<[number, number] | null>(null);
   const [isLocating, setIsLocating] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
+
   const [routeCoords, setRouteCoords] = useState<[number, number][]>([]);
   const [routeDistance, setRouteDistance] = useState('');
   const [routeDuration, setRouteDuration] = useState('');
+
   const navigationWatchId = useRef<any>(null);
   const { toast } = useToast();
 
   const defaultCenter: [number, number] = [-55.9414, -15.2924]; // Campo Verde
 
+  // --- PERMISSÕES ---
   const checkAndRequestPermissions = async () => {
     try {
       const permissionStatus = await Geolocation.checkPermissions();
       if (permissionStatus.location !== 'granted') {
-        const requestStatus = await Geolocation.requestPermissions({ permissions: ['location'] });
+        const requestStatus = await Geolocation.requestPermissions({
+          permissions: ['location'],
+        });
         if (requestStatus.location !== 'granted') {
           toast({
             title: 'Permissões necessárias',
-            description: 'Ative as permissões de localização nas configurações.',
+            description: 'Ative a localização nas configurações.',
             variant: 'destructive',
           });
           return false;
@@ -40,10 +46,16 @@ const MapView = () => {
       }
       return true;
     } catch {
+      toast({
+        title: 'Erro',
+        description: 'Não foi possível verificar permissões de localização.',
+        variant: 'destructive',
+      });
       return false;
     }
   };
 
+  // --- CALCULAR BEARING ---
   const calculateBearing = (from: [number, number], to: [number, number]) => {
     const y = Math.sin((to[0] - from[0]) * Math.PI / 180) * Math.cos(to[1] * Math.PI / 180);
     const x =
@@ -55,6 +67,7 @@ const MapView = () => {
     return (bearing + 360) % 360;
   };
 
+  // --- PEGAR LOCALIZAÇÃO ATUAL ---
   const getCurrentLocation = async () => {
     setIsLocating(true);
     try {
@@ -70,7 +83,9 @@ const MapView = () => {
 
         const markerElement = document.createElement('div');
         markerElement.innerHTML = `
-          <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="#2563eb" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(0deg);">
+          <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30"
+            viewBox="0 0 24 24" fill="#2563eb" stroke="white" stroke-width="1.5"
+            stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(0deg);">
             <path d="M12 2 L19 21 L12 17 L5 21 Z" />
           </svg>
         `;
@@ -87,6 +102,7 @@ const MapView = () => {
     }
   };
 
+  // --- INICIALIZAR MAPA ---
   useEffect(() => {
     if (!mapContainer.current) return;
 
@@ -102,11 +118,13 @@ const MapView = () => {
     map.current.on('click', handleMapClick);
 
     return () => {
-      if (navigationWatchId.current) Geolocation.clearWatch({ id: navigationWatchId.current });
+      if (navigationWatchId.current)
+        Geolocation.clearWatch({ id: navigationWatchId.current });
       map.current?.remove();
     };
   }, []);
 
+  // --- CRIAR ROTA ---
   const createRoute = async (dest: [number, number]) => {
     if (!userLocation) return;
     const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${userLocation[0]},${userLocation[1]};${dest[0]},${dest[1]}?geometries=geojson&access_token=${mapboxgl.accessToken}`;
@@ -139,6 +157,7 @@ const MapView = () => {
     });
   };
 
+  // --- CLIQUE NO MAPA PARA DEFINIR DESTINO ---
   const handleMapClick = (e: mapboxgl.MapMouseEvent & mapboxgl.EventData) => {
     if (!userLocation) return;
     const dest: [number, number] = [e.lngLat.lng, e.lngLat.lat];
@@ -148,11 +167,14 @@ const MapView = () => {
 
     const markerEl = document.createElement('div');
     markerEl.innerHTML = '🎯';
-    destinationMarker.current = new mapboxgl.Marker(markerEl).setLngLat(dest).addTo(map.current!);
+    destinationMarker.current = new mapboxgl.Marker(markerEl)
+      .setLngLat(dest)
+      .addTo(map.current!);
 
     createRoute(dest);
   };
 
+  // --- INICIAR NAVEGAÇÃO ---
   const startNavigation = async () => {
     if (!destination) return;
     setIsNavigating(true);
@@ -162,6 +184,8 @@ const MapView = () => {
       (pos) => {
         if (!pos || !userLocation) return;
         const newLoc: [number, number] = [pos.coords.longitude, pos.coords.latitude];
+
+        // Atualizar posição e rotação da seta
         if (userMarker.current) {
           userMarker.current.setLngLat(newLoc);
           const bearing = calculateBearing(userLocation, newLoc);
@@ -170,17 +194,28 @@ const MapView = () => {
         }
         setUserLocation(newLoc);
 
-        // atualizar rota removendo pontos percorridos
+        // Atualizar rota apagando pontos já percorridos
         if (map.current?.getSource('route')) {
           const remaining = routeCoords.filter((coord) => {
-            const dist = turf.distance(turf.point(coord), turf.point(newLoc), { units: 'meters' });
+            const dist = turf.distance(
+              turf.point(coord),
+              turf.point(newLoc),
+              { units: 'meters' }
+            );
             return dist > 20; // remove pontos a menos de 20m
           });
+
           setRouteCoords(remaining);
+
           (map.current.getSource('route') as mapboxgl.GeoJSONSource).setData({
             type: 'Feature',
             geometry: { type: 'LineString', coordinates: remaining },
           });
+
+          // Atualizar distância restante
+          const line = turf.lineString(remaining);
+          const total = turf.length(line, { units: 'kilometers' });
+          setRouteDistance(total.toFixed(2) + ' km');
         }
 
         map.current?.easeTo({ center: newLoc, duration: 1000 });
@@ -188,6 +223,7 @@ const MapView = () => {
     );
   };
 
+  // --- PARAR NAVEGAÇÃO ---
   const stopNavigation = async () => {
     setIsNavigating(false);
     if (navigationWatchId.current) {
@@ -200,13 +236,24 @@ const MapView = () => {
     }
     setDestination(null);
     setRouteCoords([]);
+    setRouteDistance('');
+    setRouteDuration('');
   };
 
   return (
     <div className="relative w-full h-screen">
       <div ref={mapContainer} className="absolute inset-0" />
+
+      {/* Painel inferior com status */}
+      {(routeDistance || routeDuration) && (
+        <div className="absolute bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md p-4 text-center shadow-md">
+          <p className="text-lg font-medium">Distância: {routeDistance}</p>
+          <p className="text-sm text-gray-700">Tempo estimado: {routeDuration}</p>
+        </div>
+      )}
+
       {/* Botões principais */}
-      <div className="absolute bottom-20 right-4 flex flex-col gap-3 z-10">
+      <div className="absolute bottom-28 right-4 flex flex-col gap-3 z-10">
         <Button onClick={getCurrentLocation} disabled={isLocating}>
           <Crosshair className="w-6 h-6" />
         </Button>
