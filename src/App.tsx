@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react';
 import mapboxgl from 'mapbox-gl';
 import { Geolocation, GeolocationPosition } from '@capacitor/geolocation';
-import firebase from 'firebase/app';
-import 'firebase/database';
+import { initializeApp } from 'firebase/app';
+import { getDatabase, ref, set } from 'firebase/database';
 import './App.css';
 
 mapboxgl.accessToken = 'pk.eyJ1IjoibHVhbnphZGEiLCJhIjoiY21keHNqbzdsMTMzazJtcHJ5ZDBjcXIyNSJ9.wer3icvYBkquPNu_iRrnzA';
@@ -23,10 +23,9 @@ const App = () => {
   const markerRef = useRef<mapboxgl.Marker | null>(null);
 
   useEffect(() => {
-    if (!firebase.apps.length) {
-      firebase.initializeApp(firebaseConfig);
-    }
-    const database = firebase.database();
+    // Inicializar Firebase
+    const app = initializeApp(firebaseConfig);
+    const database = getDatabase(app);
 
     if (mapContainer.current) {
       mapRef.current = new mapboxgl.Map({
@@ -38,6 +37,7 @@ const App = () => {
       mapRef.current.addControl(new mapboxgl.NavigationControl(), 'top-right');
 
       mapRef.current.on('load', () => {
+        // Usuário
         mapRef.current!.addSource('user-location', {
           type: 'geojson',
           data: { type: 'Feature', geometry: { type: 'Point', coordinates: [0, 0] } },
@@ -49,6 +49,7 @@ const App = () => {
           paint: { 'circle-radius': 8, 'circle-color': '#007cbf' },
         });
 
+        // Rota
         mapRef.current!.addSource('route', {
           type: 'geojson',
           data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [] } },
@@ -77,30 +78,26 @@ const App = () => {
 
     const setupLocation = async () => {
       await requestPermissions();
+
       try {
-        const coordinates = await Geolocation.getCurrentPosition({
-          enableHighAccuracy: true,
-          timeout: 30000,
-        });
+        const coordinates = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 30000 });
         const { latitude, longitude } = coordinates.coords;
 
         if (mapRef.current) {
           mapRef.current.setCenter([longitude, latitude]);
-          markerRef.current = new mapboxgl.Marker()
-            .setLngLat([longitude, latitude])
-            .addTo(mapRef.current);
+          markerRef.current = new mapboxgl.Marker().setLngLat([longitude, latitude]).addTo(mapRef.current);
           mapRef.current.getSource('user-location')?.setData({
             type: 'Feature',
             geometry: { type: 'Point', coordinates: [longitude, latitude] },
           });
         }
 
+        // Atualização em tempo real
         const watchId = await Geolocation.watchPosition(
           { enableHighAccuracy: true, timeout: 30000, maximumAge: 10000 },
           (position: GeolocationPosition | null, err: any) => {
             if (err || !position) {
               console.error('Erro na localização:', err);
-              alert('Não foi possível obter a localização. Verifique o GPS e a conexão.');
               return;
             }
             const { latitude, longitude } = position.coords;
@@ -113,7 +110,8 @@ const App = () => {
               });
             }
 
-            database.ref('users/user_id').set({
+            // Firebase Realtime Database (modular)
+            set(ref(database, 'users/user_id'), {
               latitude,
               longitude,
               timestamp: Date.now(),
@@ -121,6 +119,7 @@ const App = () => {
           }
         );
 
+        // Rota exemplo
         const getRoute = async (start: [number, number], end: [number, number]) => {
           try {
             const response = await fetch(
@@ -140,7 +139,7 @@ const App = () => {
         return () => Geolocation.clearWatch({ id: watchId });
       } catch (error) {
         console.error('Erro ao obter localização inicial:', error);
-        alert('Por favor, ative o GPS e conceda permissões de localização.');
+        alert('Ative o GPS e conceda permissões de localização.');
       }
     };
 
